@@ -39,6 +39,10 @@ def list_datasources():
         )
         
         items = [ds.to_dict() for ds in pagination.items]
+        
+        # 调试日志
+        logger.info(f"查询数据源: 找到 {len(items)} 条记录")
+        
         return paginated_response(items, page, per_page, pagination.total)
         
     except Exception as e:
@@ -90,6 +94,8 @@ def create_datasource():
         db.session.add(ds)
         db.session.commit()
         
+        logger.info(f"创建数据源成功: {ds.id} - {ds.name}")
+        
         return success(ds.to_dict(), '创建成功')
         
     except Exception as e:
@@ -128,6 +134,8 @@ def update_datasource(datasource_id):
         
         db.session.commit()
         
+        logger.info(f"更新数据源成功: {ds.id} - {ds.name}")
+        
         return success(ds.to_dict(), '更新成功')
         
     except Exception as e:
@@ -144,8 +152,11 @@ def delete_datasource(datasource_id):
         if not ds:
             return error('数据源不存在', status_code=404)
         
+        name = ds.name
         db.session.delete(ds)
         db.session.commit()
+        
+        logger.info(f"删除数据源成功: {datasource_id} - {name}")
         
         return success(None, '删除成功')
         
