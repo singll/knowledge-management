@@ -13,9 +13,10 @@ def list_rss_feeds():
     """获取 RSS 订阅源列表"""
     try:
         page = int(request.args.get('page', 1))
-        per_page = int(request.args.get('per_page', 10))  # 改为10，与前端一致
+        per_page = int(request.args.get('per_page', 20))
         keyword = request.args.get('keyword', '').strip()
         category = request.args.get('category', '').strip()
+        is_active = request.args.get('is_active')
         
         query = RSSFeed.query
         
@@ -29,32 +30,20 @@ def list_rss_feeds():
         
         if category:
             query = query.filter_by(category=category)
-            
-        # 添加调试日志
-        app.logger.info(f"RSS查询参数: page={page}, per_page={per_page}, keyword={keyword}, category={category}")
+        
+        if is_active is not None:
+            query = query.filter_by(is_active=is_active == 'true')
         
         pagination = query.order_by(RSSFeed.created_at.desc()).paginate(
             page=page, per_page=per_page, error_out=False
         )
         
         items = [rss.to_dict() for rss in pagination.items]
-        
-        # 确保返回格式统一
-        return {
-            "code": 0,
-            "message": "success",
-            "data": {
-                "items": items,
-                "total": pagination.total,
-                "page": page,
-                "per_page": per_page,
-                "pages": pagination.pages
-            }
-        }
+        return paginated_response(items, page, per_page, pagination.total)
         
     except Exception as e:
         logger.error(f"获取RSS列表失败: {e}", exc_info=True)
-        return {"code": 500, "message": f'获取RSS列表失败: {str(e)}'}, 500
+        return error(f'获取RSS列表失败: {str(e)}', status_code=500)
 
 
 @bp.route('/<int:rss_id>', methods=['GET'])
