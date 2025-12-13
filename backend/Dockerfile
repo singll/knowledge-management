@@ -35,10 +35,19 @@ RUN mkdir -p /app/data /tmp/ragflow_uploads && \
 # 环境变量
 ENV PYTHONUNBUFFERED=1 \
     FLASK_HOST=0.0.0.0 \
-    FLASK_PORT=5000
+    FLASK_PORT=5000 \
+    PYTHONPATH=/app
 
 EXPOSE 5000
 
-# 使用 gunicorn 运行
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:5000/health || exit 1
+
+# 修复：使用正确的模块路径
+# 方式1: 直接使用 Python 运行（推荐，更简单）
+# CMD ["python", "run.py"]
+
+# 或者方式2: 使用 gunicorn（如果需要生产级性能）
 CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:5000", "--timeout", "300", \
-     "--access-logfile", "-", "--error-logfile", "-", "run:app"]
+     "--access-logfile", "-", "--error-logfile", "-", "app:create_app()"]
