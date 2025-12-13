@@ -20,6 +20,87 @@ class RagFlowService:
             "Authorization": f"Bearer {self.api_key}",
             "Accept": "application/json",
         })
+        logger.info(f"RagFlow 服务初始化: {self.base_url}")
+    
+    # ========== Dataset (知识库) 管理 ==========
+    
+    def list_datasets(self, page=1, page_size=30, orderby='create_time', desc=True, name=None):
+        """列出知识库"""
+        url = f"{self.base_url}/api/v1/datasets"
+        params = {
+            'page': page,
+            'page_size': page_size,
+            'orderby': orderby,
+            'desc': desc
+        }
+        if name:
+            params['name'] = name
+        
+        logger.info(f"获取知识库列表: page={page}, size={page_size}")
+        response = self.session.get(url, params=params, timeout=self.timeout)
+        response.raise_for_status()
+        return response.json()
+    
+    def get_dataset(self, dataset_id):
+        """获取知识库详情"""
+        url = f"{self.base_url}/api/v1/datasets/{dataset_id}"
+        logger.info(f"获取知识库详情: {dataset_id}")
+        response = self.session.get(url, timeout=self.timeout)
+        response.raise_for_status()
+        return response.json()
+    
+    def create_dataset(self, name, avatar='', description='', language='English', 
+                      embedding_model='BAAI/bge-large-zh-v1.5', permission='me',
+                      chunk_method='naive', parser_config=None):
+        """创建知识库"""
+        url = f"{self.base_url}/api/v1/datasets"
+        data = {
+            'name': name,
+            'avatar': avatar,
+            'description': description,
+            'language': language,
+            'embedding_model': embedding_model,
+            'permission': permission,
+            'chunk_method': chunk_method
+        }
+        if parser_config:
+            data['parser_config'] = parser_config
+        
+        logger.info(f"创建知识库: {name}")
+        response = self.session.post(url, json=data, timeout=self.timeout)
+        response.raise_for_status()
+        return response.json()
+    
+    def update_dataset(self, dataset_id, name=None, description=None, 
+                      embedding_model=None, chunk_method=None, parser_config=None):
+        """更新知识库"""
+        url = f"{self.base_url}/api/v1/datasets/{dataset_id}"
+        data = {}
+        if name:
+            data['name'] = name
+        if description is not None:
+            data['description'] = description
+        if embedding_model:
+            data['embedding_model'] = embedding_model
+        if chunk_method:
+            data['chunk_method'] = chunk_method
+        if parser_config:
+            data['parser_config'] = parser_config
+        
+        logger.info(f"更新知识库: {dataset_id}")
+        response = self.session.put(url, json=data, timeout=self.timeout)
+        response.raise_for_status()
+        return response.json()
+    
+    def delete_dataset(self, dataset_id):
+        """删除知识库"""
+        url = f"{self.base_url}/api/v1/datasets/{dataset_id}"
+        logger.info(f"删除知识库: {dataset_id}")
+        response = self.session.delete(url, timeout=self.timeout)
+        response.raise_for_status()
+        return response.json()
+    
+    # ========== Document (文档) 管理 ==========
     
     def upload_string(self, dataset_id, content, filename='document.md', 
                      parser_id='naive', run='1', wait=False):
@@ -84,6 +165,7 @@ class RagFlowService:
         if keywords:
             params['keywords'] = keywords
         
+        logger.info(f"获取文档列表: dataset={dataset_id}, page={page}")
         response = self.session.get(url, params=params, timeout=self.timeout)
         response.raise_for_status()
         return response.json()
@@ -101,6 +183,13 @@ class RagFlowService:
         response = self.session.delete(url, timeout=self.timeout)
         response.raise_for_status()
         return response.json()
+    
+    def download_document(self, dataset_id, document_id):
+        """下载文档"""
+        url = f"{self.base_url}/api/v1/datasets/{dataset_id}/documents/{document_id}/download"
+        response = self.session.get(url, timeout=self.timeout)
+        response.raise_for_status()
+        return response.content
     
     def _wait_for_parsing(self, dataset_id, document_id, timeout=300):
         """等待解析完成"""
