@@ -9,8 +9,8 @@ RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 # 复制依赖文件
 COPY package.json ./
 
-# 安装依赖
-RUN pnpm install --frozen-lockfile
+# 安装依赖（不使用 frozen-lockfile）
+RUN pnpm install --no-frozen-lockfile
 
 # 复制源代码
 COPY . .
