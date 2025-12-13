@@ -1,0 +1,31 @@
+[project]
+name = "knowledge-management-backend"
+version = "1.0.0"
+description = "Knowledge Management System Backend"
+requires-python = ">=3.11"
+dependencies = [
+    "flask==3.0.3",
+    "flask-cors==5.0.0",
+    "flask-sqlalchemy==3.1.1",
+    "requests==2.32.3",
+    "gunicorn==23.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.4",
+    "black==24.10.0",
+    "ruff==0.8.4",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.black]
+line-length = 100
+target-version = ['py311']
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
