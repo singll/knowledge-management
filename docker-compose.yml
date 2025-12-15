@@ -43,7 +43,8 @@ services:
 
 networks:
   knowledge-net:
-    driver: bridge
+    external: true
+    name: knowledge-net
 
 volumes:
   backend_data:
