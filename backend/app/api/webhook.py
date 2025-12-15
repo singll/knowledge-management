@@ -20,7 +20,7 @@ def list_webhook_configs():
         
         query = WebhookConfig.query
         
-        if is_active is not None:
+        if is_active in ('true', 'false'):
             query = query.filter_by(is_active=is_active == 'true')
         
         pagination = query.order_by(WebhookConfig.created_at.desc()).paginate(

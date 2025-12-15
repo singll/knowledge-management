@@ -31,7 +31,7 @@ def list_datasources():
         if category:
             query = query.filter_by(category=category)
         
-        if is_active is not None:
+        if is_active in ('true', 'false'):
             query = query.filter_by(is_active=is_active == 'true')
         
         pagination = query.order_by(DataSource.created_at.desc()).paginate(
