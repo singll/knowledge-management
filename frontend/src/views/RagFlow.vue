@@ -26,7 +26,7 @@
               />
             </el-form-item>
             <el-form-item label="解析器">
-              <el-select v-model="uploadForm.parser_id" placeholder="选择解析器">
+              <el-select v-model="uploadForm.parser_id" placeholder="选择解析器" class="full-width-select">
                 <el-option label="Naive" value="naive" />
                 <el-option label="General" value="general" />
                 <el-option label="Paper" value="paper" />
@@ -374,5 +374,10 @@ const handleBatchUpload = async () => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+/* 下拉框样式 */
+.full-width-select {
+  width: 100%;
 }
 </style>

@@ -16,7 +16,7 @@
           <el-input v-model="searchForm.keyword" placeholder="搜索名称或URL" clearable />
         </el-form-item>
         <el-form-item label="分类">
-          <el-select v-model="searchForm.category" placeholder="选择分类" clearable>
+          <el-select v-model="searchForm.category" placeholder="选择分类" clearable class="filter-select">
             <el-option label="技术" value="tech" />
             <el-option label="新闻" value="news" />
             <el-option label="博客" value="blog" />
@@ -24,7 +24,7 @@
           </el-select>
         </el-form-item>
         <el-form-item label="状态">
-          <el-select v-model="searchForm.is_active" placeholder="选择状态" clearable>
+          <el-select v-model="searchForm.is_active" placeholder="选择状态" clearable class="filter-select">
             <el-option label="启用" value="true" />
             <el-option label="禁用" value="false" />
           </el-select>
@@ -101,14 +101,14 @@
           <el-input v-model="form.url" placeholder="https://example.com" />
         </el-form-item>
         <el-form-item label="类型" prop="type">
-          <el-select v-model="form.type" placeholder="选择类型">
+          <el-select v-model="form.type" placeholder="选择类型" class="full-width-select">
             <el-option label="网站" value="website" />
             <el-option label="API" value="api" />
             <el-option label="RSS" value="rss" />
           </el-select>
         </el-form-item>
         <el-form-item label="分类">
-          <el-select v-model="form.category" placeholder="选择分类">
+          <el-select v-model="form.category" placeholder="选择分类" class="full-width-select">
             <el-option label="技术" value="tech" />
             <el-option label="新闻" value="news" />
             <el-option label="博客" value="blog" />
@@ -116,7 +116,7 @@
           </el-select>
         </el-form-item>
         <el-form-item label="标签">
-          <el-select v-model="form.tag_ids" multiple placeholder="选择标签">
+          <el-select v-model="form.tag_ids" multiple placeholder="选择标签" class="full-width-select">
             <el-option
               v-for="tag in allTags"
               :key="tag.id"
@@ -295,5 +295,14 @@ onMounted(() => {
 
 .search-form {
   margin-bottom: 20px;
+}
+
+/* 下拉框样式 */
+.filter-select {
+  min-width: 120px;
+}
+
+.full-width-select {
+  width: 100%;
 }
 </style>

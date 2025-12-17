@@ -113,4 +113,34 @@ body {
   padding: 20px;
   overflow-y: auto;
 }
+
+/* 全局下拉框样式修复 */
+.el-select {
+  min-width: 120px;
+}
+
+.el-select .el-input__wrapper {
+  min-width: 100px;
+}
+
+.el-select .el-select__wrapper {
+  min-width: 100px;
+}
+
+/* 确保下拉选项可见 */
+.el-select-dropdown__item {
+  padding: 0 20px;
+  min-width: 100px;
+}
+
+/* 表单内的下拉框 */
+.el-form-item .el-select {
+  width: 100%;
+}
+
+/* 行内表单的下拉框 */
+.el-form--inline .el-form-item .el-select {
+  min-width: 120px;
+  width: auto;
+}
 </style>
