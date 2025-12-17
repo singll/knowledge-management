@@ -91,22 +91,30 @@ class RSSFeed(db.Model):
 class WebhookConfig(db.Model):
     """Webhook 配置表"""
     __tablename__ = 'webhook_configs'
-    
+
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
     url = db.Column(db.String(500), nullable=False)
     method = db.Column(db.String(10), default='POST')
+    content_type = db.Column(db.String(100), default='application/json')
+    headers = db.Column(db.Text)  # JSON格式存储自定义请求头
+    body_template = db.Column(db.Text)  # 请求体模板
+    timeout = db.Column(db.Integer, default=30)  # 超时时间（秒）
     description = db.Column(db.Text)
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
+
     def to_dict(self):
         return {
             'id': self.id,
             'name': self.name,
             'url': self.url,
             'method': self.method,
+            'content_type': self.content_type,
+            'headers': self.headers,
+            'body_template': self.body_template,
+            'timeout': self.timeout,
             'description': self.description,
             'is_active': self.is_active,
             'created_at': self.created_at.isoformat() if self.created_at else None,
@@ -117,29 +125,40 @@ class WebhookConfig(db.Model):
 class WebhookHistory(db.Model):
     """Webhook 调用历史表"""
     __tablename__ = 'webhook_history'
-    
+
     id = db.Column(db.Integer, primary_key=True)
     webhook_id = db.Column(db.Integer, db.ForeignKey('webhook_configs.id'), nullable=False)
-    article_url = db.Column(db.String(500), nullable=False)
-    payload = db.Column(db.Text)
+    request_url = db.Column(db.String(500))  # 实际请求的URL
+    request_method = db.Column(db.String(10))  # 请求方法
+    request_headers = db.Column(db.Text)  # 请求头JSON
+    payload = db.Column(db.Text)  # 请求体
     status = db.Column(db.String(20), default='pending')  # pending, success, failed
     response_code = db.Column(db.Integer)
+    response_headers = db.Column(db.Text)  # 响应头JSON
     response_body = db.Column(db.Text)
+    duration = db.Column(db.Integer)  # 请求耗时（毫秒）
     error_message = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    
+    # 保留旧字段兼容
+    article_url = db.Column(db.String(500))
+
     webhook = db.relationship('WebhookConfig', backref='history')
-    
+
     def to_dict(self):
         return {
             'id': self.id,
             'webhook_id': self.webhook_id,
             'webhook_name': self.webhook.name if self.webhook else None,
+            'request_url': self.request_url or self.article_url,
+            'request_method': self.request_method,
+            'request_headers': self.request_headers,
             'article_url': self.article_url,
             'payload': self.payload,
             'status': self.status,
             'response_code': self.response_code,
+            'response_headers': self.response_headers,
             'response_body': self.response_body,
+            'duration': self.duration,
             'error_message': self.error_message,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }

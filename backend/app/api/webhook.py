@@ -57,23 +57,27 @@ def create_webhook_config():
         data = request.get_json()
         name = data.get('name', '').strip()
         url = data.get('url', '').strip()
-        
+
         if not name or not url:
             return error('名称和URL不能为空', status_code=400)
-        
+
         wh = WebhookConfig(
             name=name,
             url=url,
             method=data.get('method', 'POST').upper(),
+            content_type=data.get('content_type', 'application/json'),
+            headers=data.get('headers', '{}'),
+            body_template=data.get('body_template', ''),
+            timeout=data.get('timeout', 30),
             description=data.get('description', '').strip(),
             is_active=data.get('is_active', True)
         )
-        
+
         db.session.add(wh)
         db.session.commit()
-        
+
         return success(wh.to_dict(), '创建成功')
-        
+
     except Exception as e:
         db.session.rollback()
         logger.error(f"创建Webhook配置失败: {e}", exc_info=True)
@@ -87,24 +91,32 @@ def update_webhook_config(config_id):
         wh = WebhookConfig.query.get(config_id)
         if not wh:
             return error('Webhook配置不存在', status_code=404)
-        
+
         data = request.get_json()
-        
+
         if 'name' in data:
             wh.name = data['name'].strip()
         if 'url' in data:
             wh.url = data['url'].strip()
         if 'method' in data:
             wh.method = data['method'].upper()
+        if 'content_type' in data:
+            wh.content_type = data['content_type']
+        if 'headers' in data:
+            wh.headers = data['headers']
+        if 'body_template' in data:
+            wh.body_template = data['body_template']
+        if 'timeout' in data:
+            wh.timeout = data['timeout']
         if 'description' in data:
             wh.description = data['description'].strip()
         if 'is_active' in data:
             wh.is_active = data['is_active']
-        
+
         db.session.commit()
-        
+
         return success(wh.to_dict(), '更新成功')
-        
+
     except Exception as e:
         db.session.rollback()
         logger.error(f"更新Webhook配置失败: {e}", exc_info=True)
@@ -136,27 +148,23 @@ def trigger_webhook():
     try:
         data = request.get_json()
         config_id = data.get('webhook_id')
-        article_url = data.get('article_url', '').strip()
-        
-        if not config_id or not article_url:
-            return error('webhook_id 和 article_url 不能为空', status_code=400)
-        
+        request_body = data.get('request_body')
+
+        if not config_id:
+            return error('webhook_id 不能为空', status_code=400)
+
         wh = WebhookConfig.query.get(config_id)
         if not wh:
             return error('Webhook配置不存在', status_code=404)
-        
+
         if not wh.is_active:
             return error('Webhook已禁用', status_code=400)
-        
+
         # 触发 webhook
-        result = WebhookService.trigger_webhook(
-            wh, 
-            article_url, 
-            data.get('extra_data')
-        )
-        
+        result = WebhookService.trigger_webhook(wh, request_body)
+
         return success(result, 'Webhook已触发')
-        
+
     except Exception as e:
         logger.error(f"触发Webhook失败: {e}", exc_info=True)
         return error(f'触发Webhook失败: {str(e)}', status_code=500)
