@@ -84,7 +84,7 @@
                 <div>内置变量: <code v-pre>{{timestamp}}</code>, <code v-pre>{{date}}</code>, <code v-pre>{{webhook_name}}</code></div>
                 <div v-if="templateVariables.length > 0" style="margin-top: 4px;">
                   自定义变量:
-                  <code v-for="v in templateVariables" :key="v" style="margin-right: 8px;">{{ '{{' + v + '}}' }}</code>
+                  <code v-for="v in templateVariables" :key="v" style="margin-right: 8px;" v-text="formatVariable(v)"></code>
                 </div>
               </div>
             </el-form-item>
@@ -989,6 +989,10 @@ const formatResponseBody = (body) => {
     // 如果不是JSON，直接返回原文
     return body
   }
+}
+
+const formatVariable = (v) => {
+  return '{{' + v + '}}'
 }
 
 onMounted(() => {
