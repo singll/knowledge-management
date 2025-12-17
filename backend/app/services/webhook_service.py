@@ -29,14 +29,30 @@ class WebhookService:
         return result
 
     @staticmethod
-    def trigger_webhook(webhook_config, request_body=None):
+    def process_dict_template(data, variables):
+        """递归处理字典中的模板变量"""
+        if isinstance(data, dict):
+            result = {}
+            for key, value in data.items():
+                result[key] = WebhookService.process_dict_template(value, variables)
+            return result
+        elif isinstance(data, list):
+            return [WebhookService.process_dict_template(item, variables) for item in data]
+        elif isinstance(data, str):
+            return WebhookService.process_template(data, variables)
+        else:
+            return data
+
+    @staticmethod
+    def trigger_webhook(webhook_config, request_body=None, custom_variables=None):
         """触发 webhook
 
         Args:
             webhook_config: WebhookConfig 对象
             request_body: 自定义请求体（字典），如果为None则使用配置的模板
+            custom_variables: 自定义变量字典，用于替换模板中的变量
         """
-        # 准备变量
+        # 准备内置变量
         now = datetime.utcnow()
         variables = {
             'timestamp': now.isoformat(),
@@ -45,18 +61,20 @@ class WebhookService:
             'article_url': '',  # 保持兼容
         }
 
+        # 合并自定义变量
+        if custom_variables:
+            variables.update(custom_variables)
+
         # 处理请求体
         if request_body is not None:
-            # 使用传入的请求体
-            payload = request_body
-            # 处理请求体中的变量
+            # 使用传入的请求体，递归处理所有变量
+            payload = WebhookService.process_dict_template(request_body, variables)
+            # 更新 article_url 变量（如果存在）
             if isinstance(payload, dict):
-                for key, value in payload.items():
-                    if isinstance(value, str):
-                        payload[key] = WebhookService.process_template(value, variables)
-                        # 更新 article_url 变量
-                        if key == 'url' or key == 'article_url':
-                            variables['article_url'] = payload[key]
+                if 'url' in payload:
+                    variables['article_url'] = payload['url']
+                elif 'article_url' in payload:
+                    variables['article_url'] = payload['article_url']
         elif webhook_config.body_template:
             # 使用配置的模板
             try:

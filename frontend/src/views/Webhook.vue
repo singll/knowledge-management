@@ -41,7 +41,31 @@
               </el-input>
             </el-form-item>
 
-            <el-form-item label="请求参数" v-if="selectedWebhook">
+            <!-- 动态变量输入区域 -->
+            <template v-if="selectedWebhook && templateVariables.length > 0">
+              <el-divider content-position="left">
+                <el-icon><Edit /></el-icon>
+                变量填写
+              </el-divider>
+              <el-form-item
+                v-for="variable in templateVariables"
+                :key="variable"
+                :label="variable"
+              >
+                <el-input
+                  v-model="variableValues[variable]"
+                  :placeholder="`请输入 ${variable} 的值`"
+                  clearable
+                >
+                  <template #prefix>
+                    <el-icon><Key /></el-icon>
+                  </template>
+                </el-input>
+              </el-form-item>
+              <el-divider />
+            </template>
+
+            <el-form-item label="请求体预览" v-if="selectedWebhook">
               <div class="json-editor-wrapper">
                 <el-input
                   v-model="triggerForm.request_body"
@@ -53,10 +77,15 @@
                 <div class="json-editor-actions">
                   <el-button size="small" @click="formatJson">格式化 JSON</el-button>
                   <el-button size="small" @click="loadTemplateBody">加载模板</el-button>
+                  <el-button size="small" type="primary" @click="applyVariables">应用变量</el-button>
                 </div>
               </div>
               <div class="form-tip">
-                支持变量: <code v-pre>{{article_url}}</code>, <code v-pre>{{timestamp}}</code>, <code v-pre>{{webhook_name}}</code>
+                <div>内置变量: <code v-pre>{{timestamp}}</code>, <code v-pre>{{date}}</code>, <code v-pre>{{webhook_name}}</code></div>
+                <div v-if="templateVariables.length > 0" style="margin-top: 4px;">
+                  自定义变量:
+                  <code v-for="v in templateVariables" :key="v" style="margin-right: 8px;">{{ '{{' + v + '}}' }}</code>
+                </div>
               </div>
             </el-form-item>
 
@@ -319,70 +348,135 @@
     </el-dialog>
 
     <!-- 历史详情对话框 -->
-    <el-dialog v-model="historyDetailVisible" title="调用详情" width="800px">
+    <el-dialog v-model="historyDetailVisible" title="调用详情" width="900px" class="history-detail-dialog">
       <el-tabs v-model="historyDetailTab">
         <el-tab-pane label="概览" name="overview">
           <el-descriptions :column="2" border v-if="currentHistory">
             <el-descriptions-item label="ID">{{ currentHistory.id }}</el-descriptions-item>
             <el-descriptions-item label="Webhook">{{ currentHistory.webhook_name }}</el-descriptions-item>
-            <el-descriptions-item label="请求URL" :span="2">
-              <el-link :href="currentHistory.request_url || currentHistory.article_url" target="_blank" type="primary">
-                {{ currentHistory.request_url || currentHistory.article_url }}
-              </el-link>
-            </el-descriptions-item>
             <el-descriptions-item label="请求方法">
-              <el-tag size="small">{{ currentHistory.request_method || 'POST' }}</el-tag>
+              <el-tag size="small" :type="getMethodType(currentHistory.request_method || 'POST')">
+                {{ currentHistory.request_method || 'POST' }}
+              </el-tag>
             </el-descriptions-item>
             <el-descriptions-item label="状态">
               <el-tag :type="getStatusType(currentHistory.status)">
                 {{ getStatusText(currentHistory.status) }}
               </el-tag>
             </el-descriptions-item>
-            <el-descriptions-item label="响应码">{{ currentHistory.response_code || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="耗时">{{ currentHistory.duration || '-' }} ms</el-descriptions-item>
-            <el-descriptions-item label="时间" :span="2">{{ currentHistory.created_at }}</el-descriptions-item>
+            <el-descriptions-item label="请求URL" :span="2">
+              <div class="url-display">
+                <span class="url-text">{{ currentHistory.request_url || currentHistory.article_url || '-' }}</span>
+                <el-button
+                  v-if="currentHistory.request_url || currentHistory.article_url"
+                  link
+                  type="primary"
+                  :icon="CopyDocument"
+                  @click="copyToClipboard(currentHistory.request_url || currentHistory.article_url)"
+                />
+              </div>
+            </el-descriptions-item>
+            <el-descriptions-item label="响应码">
+              <el-tag :type="getResponseCodeType(currentHistory.response_code)">
+                {{ currentHistory.response_code || '-' }}
+              </el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="耗时">
+              <span :class="getDurationClass(currentHistory.duration)">
+                {{ currentHistory.duration ? currentHistory.duration + ' ms' : '-' }}
+              </span>
+            </el-descriptions-item>
+            <el-descriptions-item label="请求时间" :span="2">{{ currentHistory.created_at }}</el-descriptions-item>
             <el-descriptions-item label="错误信息" :span="2" v-if="currentHistory.error_message">
               <el-alert :title="currentHistory.error_message" type="error" :closable="false" />
             </el-descriptions-item>
           </el-descriptions>
         </el-tab-pane>
-        <el-tab-pane label="请求数据" name="request">
+
+        <el-tab-pane label="请求详情" name="request">
           <div class="detail-section">
-            <h4>请求头</h4>
+            <div class="section-header">
+              <h4>请求 URL</h4>
+              <el-button size="small" :icon="CopyDocument" @click="copyToClipboard(currentHistory?.request_url || currentHistory?.article_url)">复制</el-button>
+            </div>
+            <div class="url-box">
+              <el-tag :type="getMethodType(currentHistory?.request_method || 'POST')" class="method-tag">
+                {{ currentHistory?.request_method || 'POST' }}
+              </el-tag>
+              <span class="url-content">{{ currentHistory?.request_url || currentHistory?.article_url || '-' }}</span>
+            </div>
+          </div>
+
+          <div class="detail-section">
+            <div class="section-header">
+              <h4>请求头 (Request Headers)</h4>
+              <el-button size="small" :icon="CopyDocument" @click="copyToClipboard(formatJsonDisplay(currentHistory?.request_headers))">复制</el-button>
+            </div>
             <el-input
-              :model-value="formatJsonDisplay(currentHistory?.request_headers)"
+              :model-value="formatJsonDisplay(currentHistory?.request_headers) || '无'"
               type="textarea"
-              :rows="5"
+              :rows="6"
               readonly
+              class="code-textarea"
             />
           </div>
+
           <div class="detail-section">
-            <h4>请求体</h4>
+            <div class="section-header">
+              <h4>请求体 (Request Body)</h4>
+              <el-button size="small" :icon="CopyDocument" @click="copyToClipboard(formatJsonDisplay(currentHistory?.payload))">复制</el-button>
+            </div>
             <el-input
-              :model-value="formatJsonDisplay(currentHistory?.payload)"
+              :model-value="formatJsonDisplay(currentHistory?.payload) || '无'"
               type="textarea"
-              :rows="10"
+              :rows="12"
               readonly
+              class="code-textarea"
             />
           </div>
         </el-tab-pane>
-        <el-tab-pane label="响应数据" name="response">
+
+        <el-tab-pane label="响应详情" name="response">
           <div class="detail-section">
-            <h4>响应头</h4>
+            <div class="section-header">
+              <h4>响应状态</h4>
+            </div>
+            <div class="response-status">
+              <el-tag :type="getResponseCodeType(currentHistory?.response_code)" size="large">
+                {{ currentHistory?.response_code || '-' }}
+              </el-tag>
+              <span class="status-text">{{ getResponseCodeText(currentHistory?.response_code) }}</span>
+              <span class="duration-text" v-if="currentHistory?.duration">
+                耗时: {{ currentHistory.duration }} ms
+              </span>
+            </div>
+          </div>
+
+          <div class="detail-section">
+            <div class="section-header">
+              <h4>响应头 (Response Headers)</h4>
+              <el-button size="small" :icon="CopyDocument" @click="copyToClipboard(formatJsonDisplay(currentHistory?.response_headers))">复制</el-button>
+            </div>
             <el-input
-              :model-value="formatJsonDisplay(currentHistory?.response_headers)"
+              :model-value="formatJsonDisplay(currentHistory?.response_headers) || '无'"
               type="textarea"
-              :rows="5"
+              :rows="6"
               readonly
+              class="code-textarea"
             />
           </div>
+
           <div class="detail-section">
-            <h4>响应体</h4>
+            <div class="section-header">
+              <h4>响应体 (Response Body)</h4>
+              <el-button size="small" :icon="CopyDocument" @click="copyToClipboard(currentHistory?.response_body)">复制</el-button>
+            </div>
             <el-input
-              :model-value="formatJsonDisplay(currentHistory?.response_body) || '无'"
+              :model-value="formatResponseBody(currentHistory?.response_body) || '无'"
               type="textarea"
-              :rows="10"
+              :rows="12"
               readonly
+              class="code-textarea"
             />
           </div>
         </el-tab-pane>
@@ -394,7 +488,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { CopyDocument, Refresh, Promotion, Delete } from '@element-plus/icons-vue'
+import { CopyDocument, Refresh, Promotion, Delete, Edit, Key } from '@element-plus/icons-vue'
 import {
   listWebhookConfigs,
   createWebhookConfig,
@@ -420,10 +514,33 @@ const currentHistory = ref(null)
 const configActiveTab = ref('basic')
 const historyDetailTab = ref('overview')
 
+// 变量值存储
+const variableValues = reactive({})
+
 const activeWebhooks = computed(() => allWebhooks.value.filter(w => w.is_active))
 const selectedWebhook = computed(() =>
   allWebhooks.value.find(w => w.id === triggerForm.webhook_id)
 )
+
+// 从模板中提取自定义变量（排除内置变量）
+const templateVariables = computed(() => {
+  if (!selectedWebhook.value?.body_template) return []
+
+  const template = selectedWebhook.value.body_template
+  const variablePattern = /\{\{\s*(\w+)\s*\}\}/g
+  const builtInVariables = ['timestamp', 'date', 'webhook_name']
+  const variables = new Set()
+
+  let match
+  while ((match = variablePattern.exec(template)) !== null) {
+    const varName = match[1]
+    if (!builtInVariables.includes(varName)) {
+      variables.add(varName)
+    }
+  }
+
+  return Array.from(variables)
+})
 
 const triggerForm = reactive({
   webhook_id: null,
@@ -511,9 +628,12 @@ const loadHistory = async () => {
   }
 }
 
-// 当选择webhook时，加载其body模板
+// 当选择webhook时，加载其body模板并重置变量
 const handleWebhookChange = () => {
   triggerResult.value = null
+  // 清空变量值
+  Object.keys(variableValues).forEach(key => delete variableValues[key])
+
   if (selectedWebhook.value && selectedWebhook.value.body_template) {
     triggerForm.request_body = selectedWebhook.value.body_template
   } else {
@@ -529,6 +649,25 @@ const handleWebhookChange = () => {
 watch(() => triggerForm.webhook_id, () => {
   handleWebhookChange()
 })
+
+// 应用变量到请求体
+const applyVariables = () => {
+  if (!selectedWebhook.value?.body_template) {
+    ElMessage.warning('没有模板可应用')
+    return
+  }
+
+  let result = selectedWebhook.value.body_template
+
+  // 替换自定义变量
+  for (const [key, value] of Object.entries(variableValues)) {
+    const pattern = new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, 'g')
+    result = result.replace(pattern, value || '')
+  }
+
+  triggerForm.request_body = result
+  ElMessage.success('变量已应用到请求体')
+}
 
 const handleTrigger = async () => {
   try {
@@ -547,9 +686,11 @@ const handleTrigger = async () => {
       }
     }
 
+    // 传递变量值到后端
     const res = await triggerWebhook({
       webhook_id: triggerForm.webhook_id,
-      request_body: requestBody
+      request_body: requestBody,
+      variables: { ...variableValues }
     })
 
     triggerResult.value = {
@@ -579,11 +720,19 @@ const resetTriggerForm = () => {
   triggerForm.webhook_id = null
   triggerForm.request_body = ''
   triggerResult.value = null
+  Object.keys(variableValues).forEach(key => delete variableValues[key])
 }
 
 const copyUrl = () => {
   if (selectedWebhook.value) {
     navigator.clipboard.writeText(selectedWebhook.value.url)
+    ElMessage.success('已复制到剪贴板')
+  }
+}
+
+const copyToClipboard = (text) => {
+  if (text) {
+    navigator.clipboard.writeText(text)
     ElMessage.success('已复制到剪贴板')
   }
 }
@@ -777,6 +926,44 @@ const getMethodType = (method) => {
   return map[method] || 'info'
 }
 
+const getResponseCodeType = (code) => {
+  if (!code) return 'info'
+  if (code >= 200 && code < 300) return 'success'
+  if (code >= 300 && code < 400) return 'warning'
+  if (code >= 400) return 'danger'
+  return 'info'
+}
+
+const getResponseCodeText = (code) => {
+  if (!code) return ''
+  const codeTexts = {
+    200: 'OK',
+    201: 'Created',
+    204: 'No Content',
+    301: 'Moved Permanently',
+    302: 'Found',
+    304: 'Not Modified',
+    400: 'Bad Request',
+    401: 'Unauthorized',
+    403: 'Forbidden',
+    404: 'Not Found',
+    405: 'Method Not Allowed',
+    408: 'Request Timeout',
+    500: 'Internal Server Error',
+    502: 'Bad Gateway',
+    503: 'Service Unavailable',
+    504: 'Gateway Timeout'
+  }
+  return codeTexts[code] || ''
+}
+
+const getDurationClass = (duration) => {
+  if (!duration) return ''
+  if (duration < 500) return 'duration-fast'
+  if (duration < 2000) return 'duration-normal'
+  return 'duration-slow'
+}
+
 const truncateUrl = (url) => {
   if (!url) return ''
   return url.length > 50 ? url.substring(0, 50) + '...' : url
@@ -789,6 +976,18 @@ const formatJsonDisplay = (jsonStr) => {
     return JSON.stringify(parsed, null, 2)
   } catch (e) {
     return jsonStr
+  }
+}
+
+const formatResponseBody = (body) => {
+  if (!body) return ''
+  // 尝试格式化JSON
+  try {
+    const parsed = JSON.parse(body)
+    return JSON.stringify(parsed, null, 2)
+  } catch (e) {
+    // 如果不是JSON，直接返回原文
+    return body
   }
 }
 
@@ -934,6 +1133,92 @@ onMounted(() => {
   font-size: 14px;
 }
 
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.section-header h4 {
+  margin: 0;
+  color: #303133;
+  font-size: 14px;
+}
+
+/* URL显示样式 */
+.url-display {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.url-text {
+  word-break: break-all;
+}
+
+.url-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  background: #f5f7fa;
+  border-radius: 4px;
+  border: 1px solid #e4e7ed;
+}
+
+.method-tag {
+  flex-shrink: 0;
+}
+
+.url-content {
+  word-break: break-all;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', monospace;
+  font-size: 13px;
+}
+
+/* 响应状态样式 */
+.response-status {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  padding: 12px;
+  background: #f5f7fa;
+  border-radius: 4px;
+}
+
+.status-text {
+  color: #606266;
+  font-size: 14px;
+}
+
+.duration-text {
+  color: #909399;
+  font-size: 13px;
+  margin-left: auto;
+}
+
+/* 代码文本框样式 */
+.code-textarea :deep(.el-textarea__inner) {
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  background: #fafafa;
+}
+
+/* 耗时颜色 */
+.duration-fast {
+  color: #67c23a;
+}
+
+.duration-normal {
+  color: #e6a23c;
+}
+
+.duration-slow {
+  color: #f56c6c;
+}
+
 /* 文本截断 */
 .truncate-text {
   display: inline-block;
@@ -945,6 +1230,11 @@ onMounted(() => {
 
 /* 配置对话框样式 */
 .config-dialog :deep(.el-dialog__body) {
+  padding-top: 10px;
+}
+
+/* 历史详情对话框样式 */
+.history-detail-dialog :deep(.el-dialog__body) {
   padding-top: 10px;
 }
 </style>

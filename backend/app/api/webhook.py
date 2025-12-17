@@ -149,6 +149,7 @@ def trigger_webhook():
         data = request.get_json()
         config_id = data.get('webhook_id')
         request_body = data.get('request_body')
+        variables = data.get('variables', {})
 
         if not config_id:
             return error('webhook_id 不能为空', status_code=400)
@@ -160,8 +161,8 @@ def trigger_webhook():
         if not wh.is_active:
             return error('Webhook已禁用', status_code=400)
 
-        # 触发 webhook
-        result = WebhookService.trigger_webhook(wh, request_body)
+        # 触发 webhook，传递变量
+        result = WebhookService.trigger_webhook(wh, request_body, variables)
 
         return success(result, 'Webhook已触发')
 
