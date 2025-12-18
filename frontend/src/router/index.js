@@ -12,11 +12,6 @@ const routes = [
     component: () => import('@/views/Datasets.vue')
   },
   {
-    path: '/ragflow',
-    name: 'RagFlow',
-    component: () => import('@/views/RagFlow.vue')
-  },
-  {
     path: '/datasources',
     name: 'DataSources',
     component: () => import('@/views/DataSources.vue')
@@ -35,6 +30,11 @@ const routes = [
     path: '/webhook',
     name: 'Webhook',
     component: () => import('@/views/Webhook.vue')
+  },
+  // 兼容旧路由，重定向到知识库
+  {
+    path: '/ragflow',
+    redirect: '/datasets'
   }
 ]
 

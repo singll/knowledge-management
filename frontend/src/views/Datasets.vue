@@ -9,6 +9,10 @@
               <el-icon><Refresh /></el-icon>
               刷新
             </el-button>
+            <el-button type="warning" @click="activeTab = 'upload'">
+              <el-icon><Upload /></el-icon>
+              上传文档
+            </el-button>
             <el-button type="success" @click="handleCreateMapping">
               <el-icon><Plus /></el-icon>
               新建映射
@@ -19,7 +23,7 @@
 
       <el-tabs v-model="activeTab">
         <!-- RagFlow 知识库列表 -->
-        <el-tab-pane label="RagFlow 知识库" name="ragflow">
+        <el-tab-pane label="知识库列表" name="ragflow">
           <el-table :data="ragflowDatasets" v-loading="loadingRagflow" stripe>
             <el-table-column prop="id" label="Dataset ID" width="280">
               <template #default="{ row }">
@@ -39,10 +43,13 @@
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="200">
+            <el-table-column label="操作" width="250">
               <template #default="{ row }">
                 <el-button link type="primary" @click="handleViewDocuments(row)">
                   查看文档
+                </el-button>
+                <el-button link type="warning" @click="handleUploadToDataset(row)">
+                  上传
                 </el-button>
                 <el-button link type="success" @click="handleQuickCreateMapping(row)">
                   创建映射
@@ -166,6 +173,126 @@
             style="margin-top: 20px; justify-content: center;"
           />
         </el-tab-pane>
+
+        <!-- 上传文档 -->
+        <el-tab-pane label="上传文档" name="upload">
+          <el-form :model="uploadForm" :rules="uploadRules" ref="uploadFormRef" label-width="120px">
+            <el-form-item label="选择知识库" prop="dataset_id">
+              <el-select
+                v-model="uploadForm.dataset_id"
+                placeholder="请选择知识库"
+                filterable
+                class="full-width"
+              >
+                <el-option
+                  v-for="ds in ragflowDatasets"
+                  :key="ds.id"
+                  :label="ds.name"
+                  :value="ds.id"
+                />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="文件名" prop="filename">
+              <el-input v-model="uploadForm.filename" placeholder="例如: document.md" />
+            </el-form-item>
+            <el-form-item label="文档内容" prop="content">
+              <el-input
+                v-model="uploadForm.content"
+                type="textarea"
+                :rows="10"
+                placeholder="请输入文档内容（支持 Markdown）"
+              />
+            </el-form-item>
+            <el-form-item label="解析器">
+              <el-select v-model="uploadForm.parser_id" placeholder="选择解析器" class="full-width">
+                <el-option label="Naive" value="naive" />
+                <el-option label="General" value="general" />
+                <el-option label="Paper" value="paper" />
+                <el-option label="Book" value="book" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="自动解析">
+              <el-switch v-model="uploadForm.auto_parse" />
+            </el-form-item>
+            <el-form-item label="等待完成">
+              <el-switch v-model="uploadForm.wait_for_completion" />
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" @click="handleUpload" :loading="uploading">
+                <el-icon><Upload /></el-icon>
+                上传文档
+              </el-button>
+              <el-button @click="resetUploadForm">重置</el-button>
+            </el-form-item>
+          </el-form>
+
+          <!-- 上传结果 -->
+          <el-alert
+            v-if="uploadResult"
+            :title="uploadResult.success ? '上传成功' : '上传失败'"
+            :type="uploadResult.success ? 'success' : 'error'"
+            :description="uploadResult.message"
+            show-icon
+            :closable="false"
+            style="margin-top: 20px;"
+          />
+
+          <!-- 批量上传区域 -->
+          <el-divider content-position="left">批量上传</el-divider>
+
+          <el-form :model="batchForm" label-width="120px">
+            <el-form-item label="选择知识库" required>
+              <el-select
+                v-model="batchForm.dataset_id"
+                placeholder="请选择知识库"
+                filterable
+                class="full-width"
+              >
+                <el-option
+                  v-for="ds in ragflowDatasets"
+                  :key="ds.id"
+                  :label="ds.name"
+                  :value="ds.id"
+                />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="文档列表">
+              <el-button @click="handleAddBatchItem" :icon="Plus">添加文档</el-button>
+            </el-form-item>
+          </el-form>
+
+          <div v-for="(item, index) in batchForm.documents" :key="index" class="batch-item">
+            <el-card>
+              <template #header>
+                <div class="batch-item-header">
+                  <span>文档 {{ index + 1 }}</span>
+                  <el-button link type="danger" @click="handleRemoveBatchItem(index)">
+                    <el-icon><Delete /></el-icon>
+                  </el-button>
+                </div>
+              </template>
+              <el-form label-width="100px">
+                <el-form-item label="文件名">
+                  <el-input v-model="item.filename" placeholder="例如: doc1.md" />
+                </el-form-item>
+                <el-form-item label="内容">
+                  <el-input v-model="item.content" type="textarea" :rows="5" />
+                </el-form-item>
+              </el-form>
+            </el-card>
+          </div>
+
+          <el-button
+            type="primary"
+            @click="handleBatchUpload"
+            :loading="batchUploading"
+            :disabled="!batchForm.dataset_id || batchForm.documents.length === 0"
+            style="margin-top: 20px;"
+          >
+            <el-icon><Upload /></el-icon>
+            批量上传
+          </el-button>
+        </el-tab-pane>
       </el-tabs>
     </el-card>
 
@@ -261,17 +388,22 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { listDatasets, listDocuments, deleteDocument } from '@/api/ragflow'
+import { listDatasets, listDocuments, deleteDocument, uploadString, uploadBatch } from '@/api/ragflow'
 import { listMappings, createMapping, updateMapping, deleteMapping } from '@/api/dataset-mapping'
 import { getAllTags } from '@/api/tags'
 import { getArticleTags } from '@/api/dataset-mapping'
+import { Plus, Delete } from '@element-plus/icons-vue'
 
+const route = useRoute()
 const activeTab = ref('ragflow')
 const loadingRagflow = ref(false)
 const loadingMappings = ref(false)
 const loadingDocs = ref(false)
 const submitting = ref(false)
+const uploading = ref(false)
+const batchUploading = ref(false)
 
 const ragflowDatasets = ref([])
 const mappings = ref([])
@@ -284,6 +416,30 @@ const docPagination = reactive({
   page: 1,
   page_size: 20,
   total: 0
+})
+
+// 上传表单
+const uploadFormRef = ref(null)
+const uploadResult = ref(null)
+const uploadForm = reactive({
+  dataset_id: '',
+  filename: 'document.md',
+  content: '',
+  parser_id: 'naive',
+  auto_parse: true,
+  wait_for_completion: false
+})
+
+const uploadRules = {
+  dataset_id: [{ required: true, message: '请选择知识库', trigger: 'change' }],
+  filename: [{ required: true, message: '请输入文件名', trigger: 'blur' }],
+  content: [{ required: true, message: '请输入文档内容', trigger: 'blur' }]
+}
+
+// 批量上传表单
+const batchForm = reactive({
+  dataset_id: '',
+  documents: []
 })
 
 const mappingDialogVisible = ref(false)
@@ -521,7 +677,106 @@ const formatSize = (bytes) => {
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
 }
 
+// 上传到指定知识库
+const handleUploadToDataset = (dataset) => {
+  uploadForm.dataset_id = dataset.id
+  batchForm.dataset_id = dataset.id
+  activeTab.value = 'upload'
+}
+
+// 上传单个文档
+const handleUpload = async () => {
+  try {
+    await uploadFormRef.value.validate()
+    uploading.value = true
+    uploadResult.value = null
+
+    const res = await uploadString({
+      dataset_id: uploadForm.dataset_id,
+      content: uploadForm.content,
+      filename: uploadForm.filename,
+      parser_id: uploadForm.parser_id,
+      run: uploadForm.auto_parse ? '1' : '0',
+      wait_for_completion: uploadForm.wait_for_completion
+    })
+
+    uploadResult.value = {
+      success: true,
+      message: `文档 ID: ${res.data.document_id}`
+    }
+    ElMessage.success('上传成功')
+  } catch (error) {
+    uploadResult.value = {
+      success: false,
+      message: error.message || '上传失败'
+    }
+  } finally {
+    uploading.value = false
+  }
+}
+
+// 重置上传表单
+const resetUploadForm = () => {
+  uploadFormRef.value.resetFields()
+  uploadResult.value = null
+}
+
+// 添加批量上传项
+const handleAddBatchItem = () => {
+  batchForm.documents.push({
+    filename: `document_${batchForm.documents.length + 1}.md`,
+    content: ''
+  })
+}
+
+// 移除批量上传项
+const handleRemoveBatchItem = (index) => {
+  batchForm.documents.splice(index, 1)
+}
+
+// 批量上传
+const handleBatchUpload = async () => {
+  if (!batchForm.dataset_id) {
+    ElMessage.warning('请选择知识库')
+    return
+  }
+
+  if (batchForm.documents.length === 0) {
+    ElMessage.warning('请至少添加一个文档')
+    return
+  }
+
+  batchUploading.value = true
+  try {
+    const res = await uploadBatch({
+      dataset_id: batchForm.dataset_id,
+      documents: batchForm.documents,
+      parser_id: 'naive',
+      run: '1'
+    })
+
+    const results = res.data.results || []
+    const successCount = results.filter(r => r.success).length
+    ElMessage.success(`批量上传完成，成功 ${successCount}/${results.length} 个`)
+
+    // 重置表单
+    batchForm.documents = []
+  } catch (error) {
+    console.error('批量上传失败:', error)
+  } finally {
+    batchUploading.value = false
+  }
+}
+
 onMounted(() => {
+  // 根据 URL 参数切换 tab
+  const tab = route.query.tab
+  if (tab === 'mapping') {
+    activeTab.value = 'mapping'
+  } else if (tab === 'upload') {
+    activeTab.value = 'upload'
+  }
+
   loadRagflowDatasets()
   loadMappings()
   loadAllTags()
@@ -568,5 +823,15 @@ onMounted(() => {
   font-size: 12px;
   color: #999;
   margin-top: 4px;
+}
+
+.batch-item {
+  margin-bottom: 15px;
+}
+
+.batch-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 </style>

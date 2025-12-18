@@ -64,21 +64,78 @@ def init_database(app):
                     db.create_all()
                 else:
                     logger.info(f"已有 {len(existing_tables)} 个表: {existing_tables}")
-                    # 检查并添加新字段
-                    migrate_webhook_tables(inspector)
+                    # 检查并添加新表和新字段
+                    migrate_database_tables(inspector)
 
         except Exception as e:
             logger.error(f"数据库初始化失败: {e}", exc_info=True)
             # 不要抛出异常，让应用继续运行
 
 
-def migrate_webhook_tables(inspector):
-    """迁移 webhook 相关表，添加新字段"""
+def migrate_database_tables(inspector):
+    """迁移数据库表，添加新表和新字段"""
     try:
         from sqlalchemy import text
+        existing_tables = inspector.get_table_names()
+
+        # 创建新表 dataset_mappings
+        if 'dataset_mappings' not in existing_tables:
+            logger.info("创建 dataset_mappings 表...")
+            db.session.execute(text("""
+                CREATE TABLE dataset_mappings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name VARCHAR(100) NOT NULL UNIQUE,
+                    display_name VARCHAR(100),
+                    dataset_id VARCHAR(100) NOT NULL,
+                    description TEXT,
+                    is_default BOOLEAN DEFAULT 0,
+                    is_active BOOLEAN DEFAULT 1,
+                    parser_id VARCHAR(50) DEFAULT 'naive',
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+            db.session.execute(text("CREATE INDEX ix_dataset_mappings_name ON dataset_mappings (name)"))
+            db.session.commit()
+            logger.info("dataset_mappings 表创建成功")
+
+        # 创建新表 dataset_tags
+        if 'dataset_tags' not in existing_tables:
+            logger.info("创建 dataset_tags 表...")
+            db.session.execute(text("""
+                CREATE TABLE dataset_tags (
+                    dataset_mapping_id INTEGER NOT NULL,
+                    tag_id INTEGER NOT NULL,
+                    PRIMARY KEY (dataset_mapping_id, tag_id),
+                    FOREIGN KEY (dataset_mapping_id) REFERENCES dataset_mappings (id),
+                    FOREIGN KEY (tag_id) REFERENCES tags (id)
+                )
+            """))
+            db.session.commit()
+            logger.info("dataset_tags 表创建成功")
+
+        # 创建新表 article_tags
+        if 'article_tags' not in existing_tables:
+            logger.info("创建 article_tags 表...")
+            db.session.execute(text("""
+                CREATE TABLE article_tags (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    document_id VARCHAR(100) NOT NULL,
+                    dataset_id VARCHAR(100) NOT NULL,
+                    tag_id INTEGER NOT NULL,
+                    article_title VARCHAR(500),
+                    article_url VARCHAR(1000),
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (tag_id) REFERENCES tags (id)
+                )
+            """))
+            db.session.execute(text("CREATE INDEX ix_article_tags_document_id ON article_tags (document_id)"))
+            db.session.execute(text("CREATE INDEX ix_article_tags_dataset_id ON article_tags (dataset_id)"))
+            db.session.commit()
+            logger.info("article_tags 表创建成功")
 
         # 检查 webhook_configs 表的字段
-        if 'webhook_configs' in inspector.get_table_names():
+        if 'webhook_configs' in existing_tables:
             columns = [col['name'] for col in inspector.get_columns('webhook_configs')]
             logger.info(f"webhook_configs 现有字段: {columns}")
 

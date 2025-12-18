@@ -21,10 +21,6 @@
               <el-icon><FolderOpened /></el-icon>
               <span>知识库</span>
             </el-menu-item>
-            <el-menu-item index="/ragflow">
-              <el-icon><Upload /></el-icon>
-              <span>文档上传</span>
-            </el-menu-item>
             <el-menu-item index="/datasources">
               <el-icon><Link /></el-icon>
               <span>数据源</span>
