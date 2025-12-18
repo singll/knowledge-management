@@ -7,6 +7,11 @@ const routes = [
     component: () => import('@/views/Home.vue')
   },
   {
+    path: '/datasets',
+    name: 'Datasets',
+    component: () => import('@/views/Datasets.vue')
+  },
+  {
     path: '/ragflow',
     name: 'RagFlow',
     component: () => import('@/views/RagFlow.vue')

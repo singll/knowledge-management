@@ -174,3 +174,71 @@ rss_tags = db.Table('rss_tags',
     db.Column('rss_id', db.Integer, db.ForeignKey('rss_feeds.id'), primary_key=True),
     db.Column('tag_id', db.Integer, db.ForeignKey('tags.id'), primary_key=True)
 )
+
+
+class DatasetMapping(db.Model):
+    """知识库映射表 - 用于工作流动态获取知识库ID"""
+    __tablename__ = 'dataset_mappings'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), unique=True, nullable=False, index=True)  # 映射名称，如 security, news, ai
+    display_name = db.Column(db.String(100))  # 显示名称，如 "安全知识库"
+    dataset_id = db.Column(db.String(100), nullable=False)  # RagFlow 中的 dataset_id
+    description = db.Column(db.Text)
+    is_default = db.Column(db.Boolean, default=False)  # 是否为默认知识库
+    is_active = db.Column(db.Boolean, default=True)
+    parser_id = db.Column(db.String(50), default='naive')  # 默认解析器
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # 关联标签（多对多）- 表示该知识库关联的标签
+    tags = db.relationship('Tag', secondary='dataset_tags', backref='datasets')
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'display_name': self.display_name,
+            'dataset_id': self.dataset_id,
+            'description': self.description,
+            'is_default': self.is_default,
+            'is_active': self.is_active,
+            'parser_id': self.parser_id,
+            'tags': [tag.to_dict() for tag in self.tags],
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+# 知识库-标签关联表
+dataset_tags = db.Table('dataset_tags',
+    db.Column('dataset_mapping_id', db.Integer, db.ForeignKey('dataset_mappings.id'), primary_key=True),
+    db.Column('tag_id', db.Integer, db.ForeignKey('tags.id'), primary_key=True)
+)
+
+
+class ArticleTag(db.Model):
+    """文章标签关联表 - 记录入库文章与标签的关联"""
+    __tablename__ = 'article_tags'
+
+    id = db.Column(db.Integer, primary_key=True)
+    document_id = db.Column(db.String(100), nullable=False, index=True)  # RagFlow 中的 document_id
+    dataset_id = db.Column(db.String(100), nullable=False, index=True)  # RagFlow 中的 dataset_id
+    tag_id = db.Column(db.Integer, db.ForeignKey('tags.id'), nullable=False)
+    article_title = db.Column(db.String(500))  # 文章标题
+    article_url = db.Column(db.String(1000))  # 文章原始URL
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    tag = db.relationship('Tag', backref='article_associations')
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'document_id': self.document_id,
+            'dataset_id': self.dataset_id,
+            'tag_id': self.tag_id,
+            'tag': self.tag.to_dict() if self.tag else None,
+            'article_title': self.article_title,
+            'article_url': self.article_url,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
