@@ -415,3 +415,68 @@ def get_articles_by_tag(tag_id):
     except Exception as e:
         logger.error(f"根据标签获取文章列表失败: {e}", exc_info=True)
         return error(f'根据标签获取文章列表失败: {str(e)}', status_code=500)
+
+
+@bp.route('/check-url', methods=['POST'])
+def check_url_exists():
+    """检查 URL 是否已入库
+
+    请求体:
+    {
+        "url": "https://example.com/article",
+        "urls": ["url1", "url2"]  // 批量检查时使用
+    }
+
+    返回:
+    单个 URL: {"exists": true/false, "document_id": "xxx", "dataset_id": "xxx"}
+    批量 URL: {"results": {"url1": {"exists": true, ...}, "url2": {"exists": false}}}
+    """
+    try:
+        data = request.get_json()
+        single_url = data.get('url')
+        urls = data.get('urls', [])
+
+        if single_url:
+            # 单个 URL 检查
+            article = ArticleTag.query.filter_by(article_url=single_url).first()
+            if article:
+                return success({
+                    'exists': True,
+                    'document_id': article.document_id,
+                    'dataset_id': article.dataset_id,
+                    'title': article.article_title,
+                    'created_at': article.created_at.isoformat() if article.created_at else None
+                })
+            else:
+                return success({'exists': False})
+
+        elif urls:
+            # 批量 URL 检查
+            results = {}
+            # 一次性查询所有 URL
+            existing_articles = ArticleTag.query.filter(
+                ArticleTag.article_url.in_(urls)
+            ).all()
+
+            # 构建 URL -> 文章 的映射
+            url_map = {a.article_url: a for a in existing_articles}
+
+            for url in urls:
+                if url in url_map:
+                    article = url_map[url]
+                    results[url] = {
+                        'exists': True,
+                        'document_id': article.document_id,
+                        'dataset_id': article.dataset_id
+                    }
+                else:
+                    results[url] = {'exists': False}
+
+            return success({'results': results})
+
+        else:
+            return error('url 或 urls 参数不能为空', status_code=400)
+
+    except Exception as e:
+        logger.error(f"检查 URL 是否存在失败: {e}", exc_info=True)
+        return error(f'检查 URL 是否存在失败: {str(e)}', status_code=500)
