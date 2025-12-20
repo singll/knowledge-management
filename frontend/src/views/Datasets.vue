@@ -126,8 +126,45 @@
             </el-form-item>
           </el-form>
 
-          <el-table :data="documents" v-loading="loadingDocs" stripe>
+          <!-- 批量操作工具栏 -->
+          <div class="batch-toolbar" v-if="selectedDocIds.length > 0">
+            <span>已选择 {{ selectedDocIds.length }} 个文档</span>
+            <el-button type="primary" size="small" @click="handleBatchParse">
+              批量解析
+            </el-button>
+            <el-button type="warning" size="small" @click="showTransferDialog = true">
+              批量换库
+            </el-button>
+            <el-button type="danger" size="small" @click="handleBatchDelete">
+              批量删除
+            </el-button>
+            <el-button size="small" @click="selectedDocIds = []">
+              取消选择
+            </el-button>
+          </div>
+
+          <el-table
+            :data="documents"
+            v-loading="loadingDocs"
+            stripe
+            @selection-change="handleDocSelectionChange"
+          >
+            <el-table-column type="selection" width="55" />
             <el-table-column prop="name" label="文档名称" show-overflow-tooltip />
+            <el-table-column label="来源URL" width="200">
+              <template #default="{ row }">
+                <el-tooltip
+                  v-if="row.meta_fields?.source_url"
+                  :content="row.meta_fields.source_url"
+                  placement="top"
+                >
+                  <a :href="row.meta_fields.source_url" target="_blank" class="source-url">
+                    {{ truncateUrl(row.meta_fields.source_url) }}
+                  </a>
+                </el-tooltip>
+                <span v-else style="color: #999;">-</span>
+              </template>
+            </el-table-column>
             <el-table-column label="状态" width="100">
               <template #default="{ row }">
                 <el-tag :type="getDocStatusType(row.status)" size="small">
@@ -135,28 +172,23 @@
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="chunk_count" label="分块数" width="100" />
-            <el-table-column prop="size" label="大小" width="100">
+            <el-table-column prop="chunk_count" label="分块数" width="80" />
+            <el-table-column prop="size" label="大小" width="80">
               <template #default="{ row }">
                 {{ formatSize(row.size) }}
               </template>
             </el-table-column>
-            <el-table-column label="关联标签">
-              <template #default="{ row }">
-                <el-tag
-                  v-for="tag in row.article_tags"
-                  :key="tag.id"
-                  :color="tag.color"
-                  style="color: #fff; margin-right: 5px;"
-                  size="small"
-                >
-                  {{ tag.name }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="120">
+            <el-table-column label="操作" width="220">
               <template #default="{ row }">
                 <el-button link type="primary" @click="handleViewDocDetail(row)">详情</el-button>
+                <el-button
+                  link
+                  :type="row.status === 0 ? 'success' : 'warning'"
+                  @click="handleToggleParse(row)"
+                >
+                  {{ row.status === 0 ? '解析' : row.status === 3 ? '停止' : '重新解析' }}
+                </el-button>
+                <el-button link type="warning" @click="handleTransferSingle(row)">换库</el-button>
                 <el-button link type="danger" @click="handleDeleteDoc(row)">删除</el-button>
               </template>
             </el-table-column>
@@ -373,6 +405,12 @@
       <el-descriptions :column="2" border v-if="selectedDoc">
         <el-descriptions-item label="文档ID" :span="2">{{ selectedDoc.id }}</el-descriptions-item>
         <el-descriptions-item label="文件名" :span="2">{{ selectedDoc.name }}</el-descriptions-item>
+        <el-descriptions-item label="来源URL" :span="2">
+          <a v-if="selectedDoc.meta_fields?.source_url" :href="selectedDoc.meta_fields.source_url" target="_blank">
+            {{ selectedDoc.meta_fields.source_url }}
+          </a>
+          <span v-else style="color: #999;">无</span>
+        </el-descriptions-item>
         <el-descriptions-item label="状态">
           <el-tag :type="getDocStatusType(selectedDoc.status)">
             {{ getDocStatusText(selectedDoc.status) }}
@@ -381,7 +419,49 @@
         <el-descriptions-item label="分块数">{{ selectedDoc.chunk_count || 0 }}</el-descriptions-item>
         <el-descriptions-item label="大小">{{ formatSize(selectedDoc.size) }}</el-descriptions-item>
         <el-descriptions-item label="创建时间">{{ selectedDoc.create_time }}</el-descriptions-item>
+        <el-descriptions-item label="元数据标签" :span="2">
+          <el-tag
+            v-for="tag in (selectedDoc.meta_fields?.tags || [])"
+            :key="tag"
+            size="small"
+            style="margin-right: 5px;"
+          >
+            {{ tag }}
+          </el-tag>
+          <span v-if="!(selectedDoc.meta_fields?.tags?.length)" style="color: #999;">无</span>
+        </el-descriptions-item>
       </el-descriptions>
+    </el-dialog>
+
+    <!-- 文档换库对话框 -->
+    <el-dialog v-model="showTransferDialog" title="文档换库" width="500px">
+      <el-form :model="transferForm" label-width="120px">
+        <el-form-item label="目标知识库">
+          <el-select v-model="transferForm.target_dataset_id" placeholder="请选择目标知识库" class="full-width">
+            <el-option
+              v-for="ds in ragflowDatasets.filter(d => d.id !== selectedDataset?.id)"
+              :key="ds.id"
+              :label="ds.name"
+              :value="ds.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="删除源文档">
+          <el-switch v-model="transferForm.delete_source" />
+          <span style="margin-left: 10px; color: #999; font-size: 12px;">
+            开启后，换库完成将删除原知识库中的文档
+          </span>
+        </el-form-item>
+        <el-form-item label="立即解析">
+          <el-switch v-model="transferForm.run_parse" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showTransferDialog = false">取消</el-button>
+        <el-button type="primary" @click="handleTransferConfirm" :loading="transferring">
+          确认换库
+        </el-button>
+      </template>
     </el-dialog>
   </div>
 </template>
@@ -390,7 +470,18 @@
 import { ref, reactive, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { listDatasets, listDocuments, deleteDocument, uploadString, uploadBatch } from '@/api/ragflow'
+import {
+  listDatasets,
+  listDocuments,
+  deleteDocument,
+  uploadString,
+  uploadBatch,
+  runParsing,
+  stopParsing,
+  batchDeleteDocuments,
+  transferDocument,
+  batchTransferDocuments
+} from '@/api/ragflow'
 import { listMappings, createMapping, updateMapping, deleteMapping } from '@/api/dataset-mapping'
 import { getAllTags } from '@/api/tags'
 import { getArticleTags } from '@/api/dataset-mapping'
@@ -464,6 +555,17 @@ const mappingRules = {
 const docDetailVisible = ref(false)
 const selectedDoc = ref(null)
 
+// 批量操作相关
+const selectedDocIds = ref([])
+const showTransferDialog = ref(false)
+const transferring = ref(false)
+const transferForm = reactive({
+  target_dataset_id: '',
+  delete_source: true,
+  run_parse: true,
+  document_ids: []
+})
+
 // 加载 RagFlow 知识库列表
 const loadRagflowDatasets = async () => {
   loadingRagflow.value = true
@@ -506,6 +608,7 @@ const loadDocuments = async () => {
   if (!selectedDataset.value) return
 
   loadingDocs.value = true
+  selectedDocIds.value = []
   try {
     const res = await listDocuments({
       dataset_id: selectedDataset.value.id,
@@ -517,16 +620,6 @@ const loadDocuments = async () => {
     const data = res.data?.data || {}
     documents.value = data.docs || []
     docPagination.total = data.total || 0
-
-    // 加载每个文档的标签
-    for (const doc of documents.value) {
-      try {
-        const tagRes = await getArticleTags(doc.id, { dataset_id: selectedDataset.value.id })
-        doc.article_tags = (tagRes.data?.tags || []).map(at => at.tag)
-      } catch (e) {
-        doc.article_tags = []
-      }
-    }
   } catch (error) {
     console.error('加载文档列表失败:', error)
   } finally {
@@ -768,6 +861,155 @@ const handleBatchUpload = async () => {
   }
 }
 
+// ========== 新增功能：批量操作、解析、换库 ==========
+
+// 文档多选处理
+const handleDocSelectionChange = (selection) => {
+  selectedDocIds.value = selection.map(doc => doc.id)
+}
+
+// URL 截断显示
+const truncateUrl = (url) => {
+  if (!url) return ''
+  if (url.length <= 40) return url
+  return url.substring(0, 40) + '...'
+}
+
+// 切换解析状态
+const handleToggleParse = async (doc) => {
+  try {
+    if (doc.status === 3) {
+      // 正在解析中，停止解析
+      await stopParsing({
+        dataset_id: selectedDataset.value.id,
+        document_ids: [doc.id]
+      })
+      ElMessage.success('已停止解析')
+    } else {
+      // 触发解析
+      await runParsing({
+        dataset_id: selectedDataset.value.id,
+        document_ids: [doc.id]
+      })
+      ElMessage.success('已触发解析')
+    }
+    // 刷新列表
+    setTimeout(() => loadDocuments(), 1000)
+  } catch (error) {
+    console.error('操作失败:', error)
+    ElMessage.error('操作失败')
+  }
+}
+
+// 批量解析
+const handleBatchParse = async () => {
+  if (selectedDocIds.value.length === 0) {
+    ElMessage.warning('请先选择文档')
+    return
+  }
+
+  try {
+    await runParsing({
+      dataset_id: selectedDataset.value.id,
+      document_ids: selectedDocIds.value
+    })
+    ElMessage.success(`已触发 ${selectedDocIds.value.length} 个文档的解析`)
+    selectedDocIds.value = []
+    setTimeout(() => loadDocuments(), 1000)
+  } catch (error) {
+    console.error('批量解析失败:', error)
+    ElMessage.error('批量解析失败')
+  }
+}
+
+// 批量删除
+const handleBatchDelete = async () => {
+  if (selectedDocIds.value.length === 0) {
+    ElMessage.warning('请先选择文档')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `确定删除选中的 ${selectedDocIds.value.length} 个文档吗？此操作不可恢复！`,
+      '批量删除确认',
+      { type: 'warning' }
+    )
+
+    await batchDeleteDocuments({
+      dataset_id: selectedDataset.value.id,
+      document_ids: selectedDocIds.value
+    })
+
+    ElMessage.success(`成功删除 ${selectedDocIds.value.length} 个文档`)
+    selectedDocIds.value = []
+    loadDocuments()
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('批量删除失败:', error)
+      ElMessage.error('批量删除失败')
+    }
+  }
+}
+
+// 单个文档换库
+const handleTransferSingle = (doc) => {
+  transferForm.document_ids = [doc.id]
+  transferForm.target_dataset_id = ''
+  showTransferDialog.value = true
+}
+
+// 确认换库
+const handleTransferConfirm = async () => {
+  if (!transferForm.target_dataset_id) {
+    ElMessage.warning('请选择目标知识库')
+    return
+  }
+
+  const docIds = transferForm.document_ids.length > 0
+    ? transferForm.document_ids
+    : selectedDocIds.value
+
+  if (docIds.length === 0) {
+    ElMessage.warning('请先选择文档')
+    return
+  }
+
+  transferring.value = true
+  try {
+    if (docIds.length === 1) {
+      // 单个文档换库
+      await transferDocument({
+        source_dataset_id: selectedDataset.value.id,
+        target_dataset_id: transferForm.target_dataset_id,
+        document_id: docIds[0],
+        delete_source: transferForm.delete_source,
+        run: transferForm.run_parse ? '1' : '0'
+      })
+    } else {
+      // 批量换库
+      await batchTransferDocuments({
+        source_dataset_id: selectedDataset.value.id,
+        target_dataset_id: transferForm.target_dataset_id,
+        document_ids: docIds,
+        delete_source: transferForm.delete_source,
+        run: transferForm.run_parse ? '1' : '0'
+      })
+    }
+
+    ElMessage.success(`成功转移 ${docIds.length} 个文档`)
+    showTransferDialog.value = false
+    selectedDocIds.value = []
+    transferForm.document_ids = []
+    loadDocuments()
+  } catch (error) {
+    console.error('换库失败:', error)
+    ElMessage.error('换库失败: ' + (error.message || '未知错误'))
+  } finally {
+    transferring.value = false
+  }
+}
+
 onMounted(() => {
   // 根据 URL 参数切换 tab
   const tab = route.query.tab
@@ -833,5 +1075,31 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.batch-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 15px;
+  background: #e6f7ff;
+  border: 1px solid #91d5ff;
+  border-radius: 4px;
+  margin-bottom: 15px;
+}
+
+.batch-toolbar span {
+  font-weight: 500;
+  color: #1890ff;
+}
+
+.source-url {
+  color: #409eff;
+  text-decoration: none;
+  font-size: 12px;
+}
+
+.source-url:hover {
+  text-decoration: underline;
 }
 </style>

@@ -417,6 +417,52 @@ def get_articles_by_tag(tag_id):
         return error(f'根据标签获取文章列表失败: {str(e)}', status_code=500)
 
 
+def normalize_url(url):
+    """规范化 URL 用于比较
+
+    - 移除末尾斜杠
+    - 统一小写域名
+    - 移除常见追踪参数
+    """
+    if not url:
+        return url
+
+    from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
+
+    url = url.strip()
+
+    # 解析 URL
+    parsed = urlparse(url)
+
+    # 小写域名
+    netloc = parsed.netloc.lower()
+
+    # 移除末尾斜杠
+    path = parsed.path.rstrip('/')
+
+    # 移除常见追踪参数
+    tracking_params = {'utm_source', 'utm_medium', 'utm_campaign', 'utm_term',
+                      'utm_content', 'fbclid', 'gclid', 'ref', 'source'}
+    if parsed.query:
+        params = parse_qs(parsed.query)
+        filtered_params = {k: v for k, v in params.items() if k.lower() not in tracking_params}
+        query = urlencode(filtered_params, doseq=True) if filtered_params else ''
+    else:
+        query = ''
+
+    # 重建 URL
+    normalized = urlunparse((
+        parsed.scheme,
+        netloc,
+        path,
+        parsed.params,
+        query,
+        ''  # 移除 fragment
+    ))
+
+    return normalized
+
+
 @bp.route('/check-url', methods=['POST'])
 def check_url_exists():
     """检查 URL 是否已入库
@@ -424,7 +470,9 @@ def check_url_exists():
     请求体:
     {
         "url": "https://example.com/article",
-        "urls": ["url1", "url2"]  // 批量检查时使用
+        "urls": ["url1", "url2"],  // 批量检查时使用
+        "normalize": true,  // 是否规范化 URL 进行比较（默认 true）
+        "fuzzy": false  // 是否模糊匹配（检查 URL 是否包含在已存储的 URL 中）
     }
 
     返回:
@@ -435,16 +483,47 @@ def check_url_exists():
         data = request.get_json()
         single_url = data.get('url')
         urls = data.get('urls', [])
+        should_normalize = data.get('normalize', True)
+        fuzzy_match = data.get('fuzzy', False)
 
         if single_url:
             # 单个 URL 检查
+            check_url = normalize_url(single_url) if should_normalize else single_url
+
+            # 精确匹配
             article = ArticleTag.query.filter_by(article_url=single_url).first()
+
+            # 如果精确匹配失败，尝试规范化匹配
+            if not article and should_normalize:
+                # 获取所有文章 URL 进行规范化比较
+                all_articles = ArticleTag.query.filter(
+                    ArticleTag.article_url.isnot(None)
+                ).all()
+
+                for a in all_articles:
+                    if a.article_url and normalize_url(a.article_url) == check_url:
+                        article = a
+                        break
+
+            # 如果还是没找到，尝试模糊匹配
+            if not article and fuzzy_match:
+                # 提取 URL 的路径部分进行模糊匹配
+                from urllib.parse import urlparse
+                parsed = urlparse(single_url)
+                path_part = parsed.path.rstrip('/')
+
+                if path_part and len(path_part) > 10:  # 确保路径足够长
+                    article = ArticleTag.query.filter(
+                        ArticleTag.article_url.contains(path_part)
+                    ).first()
+
             if article:
                 return success({
                     'exists': True,
                     'document_id': article.document_id,
                     'dataset_id': article.dataset_id,
                     'title': article.article_title,
+                    'stored_url': article.article_url,
                     'created_at': article.created_at.isoformat() if article.created_at else None
                 })
             else:
@@ -453,22 +532,51 @@ def check_url_exists():
         elif urls:
             # 批量 URL 检查
             results = {}
-            # 一次性查询所有 URL
-            existing_articles = ArticleTag.query.filter(
+
+            # 获取所有相关的文章记录
+            all_articles = ArticleTag.query.filter(
                 ArticleTag.article_url.in_(urls)
             ).all()
 
-            # 构建 URL -> 文章 的映射
-            url_map = {a.article_url: a for a in existing_articles}
+            # 构建精确匹配的 URL 映射
+            exact_map = {a.article_url: a for a in all_articles}
+
+            # 如果需要规范化匹配，获取更多文章进行比较
+            normalized_map = {}
+            if should_normalize:
+                # 获取所有有 URL 的文章
+                all_url_articles = ArticleTag.query.filter(
+                    ArticleTag.article_url.isnot(None)
+                ).all()
+                for a in all_url_articles:
+                    if a.article_url:
+                        norm_url = normalize_url(a.article_url)
+                        if norm_url not in normalized_map:
+                            normalized_map[norm_url] = a
 
             for url in urls:
-                if url in url_map:
-                    article = url_map[url]
+                # 精确匹配
+                if url in exact_map:
+                    article = exact_map[url]
                     results[url] = {
                         'exists': True,
                         'document_id': article.document_id,
-                        'dataset_id': article.dataset_id
+                        'dataset_id': article.dataset_id,
+                        'match_type': 'exact'
                     }
+                # 规范化匹配
+                elif should_normalize:
+                    norm_url = normalize_url(url)
+                    if norm_url in normalized_map:
+                        article = normalized_map[norm_url]
+                        results[url] = {
+                            'exists': True,
+                            'document_id': article.document_id,
+                            'dataset_id': article.dataset_id,
+                            'match_type': 'normalized'
+                        }
+                    else:
+                        results[url] = {'exists': False}
                 else:
                     results[url] = {'exists': False}
 

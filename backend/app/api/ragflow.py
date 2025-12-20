@@ -369,7 +369,22 @@ def upload_with_tags():
 
         document_id = result.get('document_id')
 
-        # 5. 创建文章-标签关联
+        # 5. 更新文档元数据（将 URL 存入 RagFlow，用于去重）
+        if document_id and url:
+            try:
+                meta_fields = {
+                    'source_url': url,
+                    'title': title,
+                    'tags': [t.name for t in final_tags],
+                    'crawl_time': data.get('crawl_time', ''),
+                    'category': category
+                }
+                service.update_document_metadata(dataset_id, document_id, meta_fields)
+                logger.info(f"文档元数据已更新: doc={document_id}, url={url}")
+            except Exception as meta_err:
+                logger.warning(f"更新文档元数据失败（不影响上传）: {meta_err}")
+
+        # 6. 创建文章-标签关联（保留用于向后兼容，但主要依赖 RagFlow 元数据）
         if document_id and final_tags:
             for tag in final_tags:
                 article_tag = ArticleTag(
@@ -387,10 +402,395 @@ def upload_with_tags():
             'document_id': document_id,
             'dataset_id': dataset_id,
             'tags': [t.to_dict() for t in final_tags],
-            'filename': filename
+            'filename': filename,
+            'metadata_stored': bool(url)
         }, '上传成功')
 
     except Exception as e:
         db.session.rollback()
         logger.error(f"上传文档失败: {e}", exc_info=True)
         return error(f'上传文档失败: {str(e)}', status_code=500)
+
+
+# ============ 文档解析 API ============
+
+@bp.route('/documents/parse', methods=['POST'])
+def run_parsing():
+    """触发文档解析
+
+    请求体:
+    {
+        "dataset_id": "xxx",
+        "document_ids": ["doc1", "doc2"]
+    }
+    """
+    try:
+        data = request.get_json()
+        dataset_id = data.get('dataset_id')
+        document_ids = data.get('document_ids', [])
+
+        if not dataset_id:
+            return error('dataset_id 不能为空', status_code=400)
+        if not document_ids:
+            return error('document_ids 不能为空', status_code=400)
+
+        service = RagFlowService()
+        result = service.run_parsing(dataset_id, document_ids)
+
+        return success(result, '已触发解析')
+
+    except Exception as e:
+        logger.error(f"触发解析失败: {e}", exc_info=True)
+        return error(f'触发解析失败: {str(e)}', status_code=500)
+
+
+@bp.route('/documents/parse/stop', methods=['POST'])
+def stop_parsing():
+    """停止文档解析
+
+    请求体:
+    {
+        "dataset_id": "xxx",
+        "document_ids": ["doc1", "doc2"]
+    }
+    """
+    try:
+        data = request.get_json()
+        dataset_id = data.get('dataset_id')
+        document_ids = data.get('document_ids', [])
+
+        if not dataset_id:
+            return error('dataset_id 不能为空', status_code=400)
+        if not document_ids:
+            return error('document_ids 不能为空', status_code=400)
+
+        service = RagFlowService()
+        result = service.stop_parsing(dataset_id, document_ids)
+
+        return success(result, '已停止解析')
+
+    except Exception as e:
+        logger.error(f"停止解析失败: {e}", exc_info=True)
+        return error(f'停止解析失败: {str(e)}', status_code=500)
+
+
+@bp.route('/documents/parse/status', methods=['GET'])
+def get_parsing_status():
+    """获取文档解析状态"""
+    try:
+        dataset_id = request.args.get('dataset_id')
+        document_id = request.args.get('document_id')
+
+        if not dataset_id or not document_id:
+            return error('dataset_id 和 document_id 不能为空', status_code=400)
+
+        service = RagFlowService()
+        result = service.get_parsing_status(dataset_id, document_id)
+
+        return success(result)
+
+    except Exception as e:
+        logger.error(f"获取解析状态失败: {e}", exc_info=True)
+        return error(f'获取解析状态失败: {str(e)}', status_code=500)
+
+
+# ============ 批量操作 API ============
+
+@bp.route('/documents/batch-delete', methods=['POST'])
+def batch_delete_documents():
+    """批量删除文档
+
+    请求体:
+    {
+        "dataset_id": "xxx",
+        "document_ids": ["doc1", "doc2"]
+    }
+    """
+    try:
+        from app.models import ArticleTag
+        from app.extensions import db
+
+        data = request.get_json()
+        dataset_id = data.get('dataset_id')
+        document_ids = data.get('document_ids', [])
+
+        if not dataset_id:
+            return error('dataset_id 不能为空', status_code=400)
+        if not document_ids:
+            return error('document_ids 不能为空', status_code=400)
+
+        service = RagFlowService()
+        result = service.delete_documents_batch(dataset_id, document_ids)
+
+        # 同时删除本地的文章标签关联
+        ArticleTag.query.filter(
+            ArticleTag.dataset_id == dataset_id,
+            ArticleTag.document_id.in_(document_ids)
+        ).delete(synchronize_session=False)
+        db.session.commit()
+
+        return success({
+            'ragflow_result': result,
+            'deleted_count': len(document_ids)
+        }, '批量删除成功')
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"批量删除失败: {e}", exc_info=True)
+        return error(f'批量删除失败: {str(e)}', status_code=500)
+
+
+@bp.route('/documents/transfer', methods=['POST'])
+def transfer_document():
+    """转移单个文档到另一个知识库
+
+    请求体:
+    {
+        "source_dataset_id": "xxx",
+        "target_dataset_id": "yyy",
+        "document_id": "doc1",
+        "delete_source": true,
+        "parser_id": "naive",
+        "run": "1"
+    }
+    """
+    try:
+        from app.models import ArticleTag
+        from app.extensions import db
+
+        data = request.get_json()
+        source_dataset_id = data.get('source_dataset_id')
+        target_dataset_id = data.get('target_dataset_id')
+        document_id = data.get('document_id')
+        delete_source = data.get('delete_source', True)
+        parser_id = data.get('parser_id', 'naive')
+        run = data.get('run', '1')
+
+        if not source_dataset_id or not target_dataset_id:
+            return error('source_dataset_id 和 target_dataset_id 不能为空', status_code=400)
+        if not document_id:
+            return error('document_id 不能为空', status_code=400)
+        if source_dataset_id == target_dataset_id:
+            return error('源知识库和目标知识库不能相同', status_code=400)
+
+        service = RagFlowService()
+        result = service.transfer_document(
+            source_dataset_id, target_dataset_id, document_id,
+            delete_source=delete_source, parser_id=parser_id, run=run
+        )
+
+        # 更新本地文章标签关联
+        if result.get('success') and result.get('target_document_id'):
+            ArticleTag.query.filter_by(
+                dataset_id=source_dataset_id,
+                document_id=document_id
+            ).update({
+                'dataset_id': target_dataset_id,
+                'document_id': result['target_document_id']
+            })
+            db.session.commit()
+
+        return success(result, '文档转移成功')
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"文档转移失败: {e}", exc_info=True)
+        return error(f'文档转移失败: {str(e)}', status_code=500)
+
+
+@bp.route('/documents/batch-transfer', methods=['POST'])
+def batch_transfer_documents():
+    """批量转移文档到另一个知识库
+
+    请求体:
+    {
+        "source_dataset_id": "xxx",
+        "target_dataset_id": "yyy",
+        "document_ids": ["doc1", "doc2"],
+        "delete_source": true,
+        "parser_id": "naive",
+        "run": "1"
+    }
+    """
+    try:
+        from app.models import ArticleTag
+        from app.extensions import db
+
+        data = request.get_json()
+        source_dataset_id = data.get('source_dataset_id')
+        target_dataset_id = data.get('target_dataset_id')
+        document_ids = data.get('document_ids', [])
+        delete_source = data.get('delete_source', True)
+        parser_id = data.get('parser_id', 'naive')
+        run = data.get('run', '1')
+
+        if not source_dataset_id or not target_dataset_id:
+            return error('source_dataset_id 和 target_dataset_id 不能为空', status_code=400)
+        if not document_ids:
+            return error('document_ids 不能为空', status_code=400)
+        if source_dataset_id == target_dataset_id:
+            return error('源知识库和目标知识库不能相同', status_code=400)
+
+        service = RagFlowService()
+        result = service.transfer_documents_batch(
+            source_dataset_id, target_dataset_id, document_ids,
+            delete_source=delete_source, parser_id=parser_id, run=run
+        )
+
+        # 更新本地文章标签关联
+        for item in result.get('results', []):
+            if item.get('success') and item.get('target_document_id'):
+                ArticleTag.query.filter_by(
+                    dataset_id=source_dataset_id,
+                    document_id=item['source_document_id']
+                ).update({
+                    'dataset_id': target_dataset_id,
+                    'document_id': item['target_document_id']
+                })
+        db.session.commit()
+
+        return success(result, '批量转移完成')
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"批量转移失败: {e}", exc_info=True)
+        return error(f'批量转移失败: {str(e)}', status_code=500)
+
+
+# ============ Chunk (分块) 管理 API ============
+
+@bp.route('/chunks', methods=['GET'])
+def list_chunks():
+    """列出文档分块"""
+    try:
+        dataset_id = request.args.get('dataset_id')
+        document_id = request.args.get('document_id')
+
+        if not dataset_id or not document_id:
+            return error('dataset_id 和 document_id 不能为空', status_code=400)
+
+        page = int(request.args.get('page', 1))
+        page_size = int(request.args.get('page_size', 20))
+        keywords = request.args.get('keywords')
+
+        service = RagFlowService()
+        result = service.list_chunks(dataset_id, document_id, page, page_size, keywords)
+
+        return success(result)
+
+    except Exception as e:
+        logger.error(f"获取分块列表失败: {e}", exc_info=True)
+        return error(f'获取分块列表失败: {str(e)}', status_code=500)
+
+
+@bp.route('/chunks', methods=['DELETE'])
+def delete_chunks():
+    """删除指定分块
+
+    请求体:
+    {
+        "dataset_id": "xxx",
+        "document_id": "yyy",
+        "chunk_ids": ["chunk1", "chunk2"]
+    }
+    """
+    try:
+        data = request.get_json()
+        dataset_id = data.get('dataset_id')
+        document_id = data.get('document_id')
+        chunk_ids = data.get('chunk_ids', [])
+
+        if not dataset_id or not document_id:
+            return error('dataset_id 和 document_id 不能为空', status_code=400)
+        if not chunk_ids:
+            return error('chunk_ids 不能为空', status_code=400)
+
+        service = RagFlowService()
+        result = service.delete_chunks(dataset_id, document_id, chunk_ids)
+
+        return success(result, '删除分块成功')
+
+    except Exception as e:
+        logger.error(f"删除分块失败: {e}", exc_info=True)
+        return error(f'删除分块失败: {str(e)}', status_code=500)
+
+
+# ============ 文档元数据 API ============
+
+@bp.route('/documents/metadata', methods=['PUT'])
+def update_document_metadata():
+    """更新文档元数据
+
+    请求体:
+    {
+        "dataset_id": "xxx",
+        "document_id": "yyy",
+        "meta_fields": {
+            "source_url": "https://example.com/article",
+            "author": "作者名",
+            "tags": ["tag1", "tag2"]
+        }
+    }
+    """
+    try:
+        data = request.get_json()
+        dataset_id = data.get('dataset_id')
+        document_id = data.get('document_id')
+        meta_fields = data.get('meta_fields', {})
+
+        if not dataset_id or not document_id:
+            return error('dataset_id 和 document_id 不能为空', status_code=400)
+        if not meta_fields:
+            return error('meta_fields 不能为空', status_code=400)
+
+        service = RagFlowService()
+        result = service.update_document_metadata(dataset_id, document_id, meta_fields)
+
+        return success(result, '更新元数据成功')
+
+    except Exception as e:
+        logger.error(f"更新元数据失败: {e}", exc_info=True)
+        return error(f'更新元数据失败: {str(e)}', status_code=500)
+
+
+@bp.route('/check-url', methods=['POST'])
+def check_url_exists_in_ragflow():
+    """检查 URL 是否已存在于 RagFlow 中
+
+    通过搜索文档元数据中的 source_url 字段来检查，实现与 RagFlow 解耦的去重
+
+    请求体:
+    {
+        "url": "https://example.com/article",
+        "urls": ["url1", "url2"],  // 批量检查时使用
+        "dataset_ids": ["id1", "id2"]  // 可选，指定搜索的知识库
+    }
+
+    返回:
+    单个 URL: {"exists": true/false, "document_id": "xxx", "dataset_id": "xxx", "match_type": "exact/normalized"}
+    批量 URL: {"results": {"url1": {...}, "url2": {...}}}
+    """
+    try:
+        data = request.get_json()
+        single_url = data.get('url')
+        urls = data.get('urls', [])
+        dataset_ids = data.get('dataset_ids')
+
+        service = RagFlowService()
+
+        if single_url:
+            # 单个 URL 检查
+            result = service.check_url_in_ragflow(single_url, dataset_ids)
+            return success(result)
+
+        elif urls:
+            # 批量 URL 检查
+            results = service.batch_check_urls_in_ragflow(urls, dataset_ids)
+            return success({'results': results})
+
+        else:
+            return error('url 或 urls 参数不能为空', status_code=400)
+
+    except Exception as e:
+        logger.error(f"检查 URL 是否存在失败: {e}", exc_info=True)
+        return error(f'检查 URL 是否存在失败: {str(e)}', status_code=500)

@@ -89,3 +89,91 @@ export const uploadBatch = (data) => {
     data
   })
 }
+
+// 文档解析 API
+
+export const runParsing = (data) => {
+  return request({
+    url: '/ragflow/documents/parse',
+    method: 'post',
+    data
+  })
+}
+
+export const stopParsing = (data) => {
+  return request({
+    url: '/ragflow/documents/parse/stop',
+    method: 'post',
+    data
+  })
+}
+
+export const getParsingStatus = (params) => {
+  return request({
+    url: '/ragflow/documents/parse/status',
+    method: 'get',
+    params
+  })
+}
+
+// 批量操作 API
+
+export const batchDeleteDocuments = (data) => {
+  return request({
+    url: '/ragflow/documents/batch-delete',
+    method: 'post',
+    data
+  })
+}
+
+export const transferDocument = (data) => {
+  return request({
+    url: '/ragflow/documents/transfer',
+    method: 'post',
+    data
+  })
+}
+
+export const batchTransferDocuments = (data) => {
+  return request({
+    url: '/ragflow/documents/batch-transfer',
+    method: 'post',
+    data
+  })
+}
+
+// 文档元数据 API
+
+export const updateDocumentMetadata = (data) => {
+  return request({
+    url: '/ragflow/documents/metadata',
+    method: 'put',
+    data
+  })
+}
+
+export const checkUrlExists = (data) => {
+  return request({
+    url: '/ragflow/check-url',
+    method: 'post',
+    data
+  })
+}
+
+// Chunk 分块 API
+
+export const listChunks = (params) => {
+  return request({
+    url: '/ragflow/chunks',
+    method: 'get',
+    params
+  })
+}
+
+export const deleteChunks = (data) => {
+  return request({
+    url: '/ragflow/chunks',
+    method: 'delete',
+    data
+  })
+}
